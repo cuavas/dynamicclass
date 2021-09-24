@@ -1,0 +1,4 @@
+*.exe
+*.o
+.*.sw?
+api-doc
