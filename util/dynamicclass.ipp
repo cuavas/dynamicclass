@@ -27,7 +27,7 @@ inline void dynamic_derived_class_base::restore_base_vptr(
 	std::uintptr_t &vptr = *reinterpret_cast<uintptr_t *>(&object);
 	std::uintptr_t const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
 	vptr = *reinterpret_cast<uintptr_t const *>(typeinfo + base_vtable_offset());
-	assert(vptr);
+	assert(reinterpret_cast<void const *>(vptr));
 }
 
 
@@ -257,7 +257,12 @@ void dynamic_derived_class<Base, Extra, VirtualCount>::restore_base_member_funct
 /// \param [out] object Receives an pointer to the object storing the
 ///   base type and extra data.
 /// \param [in] args Constructor arguments for the object to be
-///   instantiated.
+///   instantiated.  If the first argument is
+///   \c std::piecewise_construct, it must be followed by two tuples
+///   containing the arguments to forward to the base class and extra
+///   data constructors, respectively.  If the first argument is not
+///   \c std::piecewise_construct, all the arguments are forwarded to
+///   the base class constructor.
 /// \return A unique pointer to the new instance.
 template <class Base, typename Extra, std::size_t VirtualCount>
 template <typename... T>

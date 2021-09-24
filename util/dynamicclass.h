@@ -137,6 +137,46 @@ private:
 
 
 
+/// \brief Dynamic derived class
+///
+/// Allows dynamically creating classes derived from a supplied base
+/// class and overriding virtual member functions.  A class must meet a
+/// number of requirements to be suitable for use as a base class.  Most
+/// of these requirements cannot be checked automatically.  It is the
+/// developer's responsibility to ensure the requirements are met.
+///
+/// The dynamic derived class object must not be destroyed until after
+/// all instances of the class have been destroyed.
+///
+/// When destroying an instance of the dynamic derived class, the base
+/// class vtable is restored before the extra data destructor is called.
+/// This allows the extra data type to hold a smart pointer to the
+/// dynamic derived class so it can be cleaned up automatically when all
+/// instances are destroyed.  However, it means you must keep in mind
+/// that the base class implementation of all virtual member functions
+/// will be restored before the extra data destructor is called.
+/// \tparam Base Base class for the dynamic derived class.  Must meet
+///   the following requirements:
+///   * Must be a concrete class with at least one public constructor
+///     and a public destructor.
+///   * Must have at least one virtual member function.
+///   * Must not have any direct or indirect virtual base classes.
+///   * Must have no secondary virtual tables.  This means the class and
+///     all of its direct and indirect base classes may only inherit
+///     virtual member functions from one base class at most.
+///   * If the class has a virtual destructor, it must be declared
+///     declared before any other virtual member functions in the least
+///     derived base class containing virtual member functions.
+/// \tparam Extra Extra data type, or \c void if not required.  Must be
+///   a concrete type with at least one public constructor and a public
+///   destructor.
+/// \tparam VirtualCount The total number of virtual member functions of
+///   the base class, excluding the virtual destructor if present.  This
+///   must be correct, and cannot be checked automatically.  It is the
+///   developer's responsibility to ensure the value is correct.  This
+///   potentially includes additional entries for overridden member
+///   functions with covariant return types and implicitly-declared
+///   assignment operators.
 template <class Base, typename Extra, std::size_t VirtualCount>
 class dynamic_derived_class : private detail::dynamic_derived_class_base
 {
@@ -170,6 +210,17 @@ public:
 
 	dynamic_derived_class(std::string_view name);
 	dynamic_derived_class(dynamic_derived_class const &prototype, std::string_view name);
+
+	/// \brief Get type info for dynamic derived class
+	///
+	/// Gets a reference to the type info for the dynamic derived class.
+	/// The reference remains valid and unique as long as the dynamic
+	/// derived class is not destroyed.
+	/// \return A reference to an object equivalent to \c std::type_info.
+	std::type_info const &type_info() const
+	{
+		return *reinterpret_cast<std::type_info const *>(&m_type_info);
+	}
 
 	template <typename R, typename... T>
 	void override_member_function(R (Base::*slot)(T...), R MAME_ABI_CXX_MEMBER_CALL (*func)(type &, T...));
