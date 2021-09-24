@@ -16,7 +16,7 @@ public:
 
 using simple_extender = util::dynamic_derived_class<virtual_destructor_base, void, 2>;
 
-void simple_override(simple_extender::type &object, int i)
+void MAME_ABI_CXX_MEMBER_CALL simple_override(simple_extender::type &object, int i)
 {
 	printf("simple_override(%p, %d)\n", &object, i);
 }
@@ -115,7 +115,7 @@ void simple_extender_test()
 
 using extra_data_extender = util::dynamic_derived_class<virtual_destructor_base, int, 2>;
 
-void extra_data_override(extra_data_extender::type &object, int i)
+void MAME_ABI_CXX_MEMBER_CALL extra_data_override(extra_data_extender::type &object, int i)
 {
 	printf("extra_data_override(%p, %d) extra = %d\n", &object, i, object.extra);
 }
@@ -179,7 +179,7 @@ struct metaclass
 	std::unique_ptr<class_referencing_extender> c;
 };
 
-void class_referencing_override(class_referencing_extender::type &obj, int i)
+void MAME_ABI_CXX_MEMBER_CALL class_referencing_override(class_referencing_extender::type &obj, int i)
 {
 	printf("class_referencing_override(%p, %d)\n", &obj, i);
 }
