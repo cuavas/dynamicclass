@@ -130,6 +130,7 @@ dynamic_derived_class<Base, Extra, VirtualCount>::dynamic_derived_class(
 {
 	m_type_info.base_type = &typeid(Base);
 	m_base_vtable = prototype.m_base_vtable;
+	m_vtable[1] = uintptr_t(&m_type_info); // type info
 }
 
 
