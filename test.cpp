@@ -8,9 +8,19 @@ namespace {
 class virtual_destructor_base
 {
 public:
-	virtual ~virtual_destructor_base() { printf("calling x(3) from base::~base: "); x(3); }
-	virtual void x(int i) { printf("base::x(%d)\n", i); }
-	virtual void y(int i) { printf("base::y(%d)\n", i); }
+	virtual ~virtual_destructor_base() { printf("calling x(3) from virtual_destructor_base::~virtual_destructor_base: "); x(3); }
+	virtual void x(int i) { printf("virtual_destructor_base::x(%d)\n", i); }
+	virtual void y(int i) { printf("virtual_destructor_base::y(%d)\n", i); }
+};
+
+
+class non_virtual_destructor_base
+{
+public:
+	virtual ~non_virtual_destructor_base() { printf("calling b(4) from non_virtual_destructor_base::~virtual_destructor_base: "); b(4); }
+	virtual int a(int i) const { printf("non_virtual_destructor_base::a(%d)\n", i); return i + 1; }
+	virtual int b(int i) { printf("non_virtual_destructor_base::b(%d)\n", i); return i + 2; }
+	virtual int c(int i) { printf("non_virtual_destructor_base::c(%d)\n", i); return i + 3; }
 };
 
 
@@ -20,7 +30,6 @@ void MAME_ABI_CXX_MEMBER_CALL simple_override(simple_extender::type &object, int
 {
 	printf("simple_override(%p, %d)\n", &object, i);
 }
-
 
 void simple_extender_test()
 {
@@ -181,7 +190,8 @@ struct metaclass
 
 void MAME_ABI_CXX_MEMBER_CALL class_referencing_override(class_referencing_extender::type &obj, int i)
 {
-	printf("class_referencing_override(%p, %d)\n", &obj, i);
+	printf("class_referencing_override(%p, %d) calling base::x(i): ", &obj, i);
+	obj.call_base_member_function(&virtual_destructor_base::x, i);
 }
 
 void class_referencing_extender_test()
@@ -207,6 +217,44 @@ void class_referencing_extender_test()
 	i1->y(8);
 }
 
+
+using non_virtual_destructor_extender = util::dynamic_derived_class<non_virtual_destructor_base, void, 3>;
+
+int MAME_ABI_CXX_MEMBER_CALL non_virtual_destructor_const_override(non_virtual_destructor_extender::type const &object, int i)
+{
+	printf("non_virtual_destructor_const_override(%p, %d)\n", &object, i);
+	return -i;
+}
+
+int MAME_ABI_CXX_MEMBER_CALL non_virtual_destructor_override(non_virtual_destructor_extender::type &object, int i)
+{
+	printf("non_virtual_destructor_override(%p, %d)\n", &object, i);
+	return -i;
+}
+
+void non_virtual_destructor_test()
+{
+	printf("Testing extender for class without virtual destructor\n");
+
+	non_virtual_destructor_extender::type *actual;
+
+	printf("Creating extension class extender and overriding a(int) and b(int)\n");
+	non_virtual_destructor_extender extender("extender");
+	extender.override_member_function(&non_virtual_destructor_base::a, &non_virtual_destructor_const_override);
+	extender.override_member_function(&non_virtual_destructor_base::b, &non_virtual_destructor_override);
+
+	printf("Creating instance i1 of class extender\n");
+	auto i1 = extender.instantiate(actual);
+	printf("i1 @%p, extended storage @%p\n", i1.get(), actual);
+	printf("typeid(i1).name(): %s\n", typeid(*i1).name());
+	printf("i1->a(4): ");
+	printf("returned %d\n", i1->a(4));
+	printf("i1->b(5): ");
+	printf("returned %d\n", i1->b(5));
+	printf("i1->c(6): ");
+	printf("returned %d\n", i1->c(6));
+}
+
 } // anonymous namespace
 
 
@@ -217,6 +265,8 @@ int main(int argc, char *argv[])
 	extra_data_extender_test();
 	printf("\n");
 	class_referencing_extender_test();
+	printf("\n");
+	non_virtual_destructor_test();
 
 	return 0;
 }

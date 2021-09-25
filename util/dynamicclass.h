@@ -42,23 +42,76 @@ namespace util {
 
 namespace detail {
 
+/// \brief Dynamic derived class base
+///
+/// Provides common members for dynamic derived classes that do not
+/// depend on the size of the virtual table.
 class dynamic_derived_class_base
 {
 protected:
+	/// \brief Size of a member function virtual table entry
+	///
+	/// The size of an entry representing a virtual member function in a
+	/// virtual table, as a multiple of the size of a pointer.
 	static constexpr std::size_t MEMBER_FUNCTION_SIZE = MAME_ABI_CXX_VTABLE_FNDESC ? MAME_ABI_FNDESC_SIZE : 1;
 
-	struct itanium_si_slass_type_info_equiv
+	/// \brief Single inheritance class type info equivalent structure
+	///
+	/// Structure equivalent to the implementation of std::type_info for
+	/// a class with a single direct base class.
+	struct itanium_si_class_type_info_equiv
 	{
-		void const *vptr;
-		char const *name;
-		std::type_info const *base_type;
+		void const *vptr;                   ///< Pointer to single inheritance class type info virtual table
+		char const *name;                   ///< Mangled name of the class
+		std::type_info const *base_type;    ///< Pointer to type info for the base class
 	};
 
+	/// \brief Member function pointer equivalent structure
+	///
+	/// Structure equivalent to the representation of a pointer to a
+	/// member function.
 	struct member_function_pointer_equiv
 	{
-		uintptr_t ptr;
-		ptrdiff_t adj;
+		uintptr_t ptr;   ///< Function pointer or virtual table index
+		ptrdiff_t adj;   ///< Offset to add to \c this pointer before call
+
+		constexpr bool is_virtual() const
+		{
+			return (MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_ARM) ? bool(adj & 1) : bool(ptr & 1);
+		}
+
+		constexpr uintptr_t function_pointer() const
+		{
+			//assert(!is_virtual()); not constexpr
+			return ptr;
+		}
+
+		constexpr uintptr_t virtual_table_entry_offset() const
+		{
+			//assert(is_virtual()); not constexpr
+			return ptr - ((MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_STANDARD) ? 1 : 0);
+		}
+
+		constexpr ptrdiff_t this_pointer_offset() const
+		{
+			return adj >> ((MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_ARM) ? 1 : 0);
+		}
 	};
+
+	template <typename T>
+	struct member_function_pointer_pun
+	{
+		static_assert(sizeof(T) == sizeof(member_function_pointer_equiv), "Unsupported member function pointer representation");
+
+		union type
+		{
+			T ptr;
+			member_function_pointer_equiv equiv;
+		};
+	};
+
+	template <typename T>
+	using member_function_pointer_pun_t = typename member_function_pointer_pun<T>::type;
 
 	template <class Base, typename Extra>
 	class value_type
@@ -74,6 +127,7 @@ protected:
 			extra(std::forward<U>(std::get<O>(b))...)
 		{
 		}
+
 	public:
 		template <typename... T>
 		value_type(T &&... a) :
@@ -87,6 +141,20 @@ protected:
 		{
 		}
 
+		template <typename R, typename... T>
+		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
+				R (Base::*func)(T...))
+		{
+			return dynamic_derived_class_base::resolve_base_member_function(base, func);
+		}
+
+		template <typename R, typename... T>
+		R call_base_member_function(R (Base::*func)(T...), T... args)
+		{
+			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
+			return resolved.first(resolved.second, std::forward<T>(args)...);
+		}
+
 		Base base;
 		Extra extra;
 	};
@@ -97,12 +165,33 @@ protected:
 	public:
 		template <typename... T> value_type(T &&... args) : base(std::forward<T>(args)...) { }
 
+		template <typename R, typename... T>
+		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
+				R (Base::*func)(T...))
+		{
+			return dynamic_derived_class_base::resolve_base_member_function(base, func);
+		}
+
+		template <typename R, typename... T>
+		R call_base_member_function(R (Base::*func)(T...), T... args)
+		{
+			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
+			return resolved.first(resolved.second, std::forward<T>(args)...);
+		}
+
 		Base base;
 	};
 
 	template <class Base, typename Extra, typename Enable = void>
 	struct destroyer;
 
+	/// \brief Destroyer for base classes with virtual destructors
+	///
+	/// Provides implementations of the complete object destructor and
+	/// deleting destructor required to allow deleting instances of
+	/// dynamic derived classes through pointers to the base class type.
+	/// \tparam Base The base class type.
+	/// \tparam Extra The extra data type.
 	template <class Base, typename Extra>
 	struct destroyer<Base, Extra, std::enable_if_t<std::has_virtual_destructor_v<Base> > >
 	{
@@ -112,9 +201,18 @@ protected:
 		static void MAME_ABI_CXX_MEMBER_CALL deleting_destructor(value_type<Base, Extra> *object);
 	};
 
+	/// \brief Destroyer for base classes without virtual destructors
+	///
+	/// Used as the deleter type allowing a \c std::unique_ptr to
+	/// correctly delete instances of a dynamic derived class when the
+	/// the base class type does not have a virtual destructor.
+	/// \tparam Base The base class type.
+	/// \tparam Extra The extra data type.
 	template <class Base, typename Extra>
 	struct destroyer<Base, Extra, std::enable_if_t<!std::has_virtual_destructor_v<Base> > >
 	{
+		static_assert(sizeof(Base) == sizeof(value_type<Base, Extra>), "Value type does not have expected layout");
+
 		using pointer_type = std::unique_ptr<Base, destroyer>;
 
 		void operator()(Base *object) const;
@@ -122,15 +220,21 @@ protected:
 
 	dynamic_derived_class_base(std::string_view name);
 
-	itanium_si_slass_type_info_equiv m_type_info;
-	std::string m_name;
-	void const *m_base_vtable;
+	itanium_si_class_type_info_equiv m_type_info;   ///< Type info for the dynamic derived class
+	std::string m_name;                             ///< Storage for the mangled class name
+	void const *m_base_vtable;                      ///< Saved base class virtual table pointer
 
 private:
 	static std::ptrdiff_t base_vtable_offset();
 
 	template <typename Base>
+	static uintptr_t const *get_base_vptr(Base const &object);
+
+	template <typename Base>
 	static void restore_base_vptr(Base &object);
+
+	template <typename Base, typename R, typename... T>
+	static std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(Base &object, R (Base::*func)(T...));
 };
 
 } // namespace detail
@@ -180,23 +284,16 @@ private:
 template <class Base, typename Extra, std::size_t VirtualCount>
 class dynamic_derived_class : private detail::dynamic_derived_class_base
 {
-private:
-	static_assert(sizeof(std::uintptr_t) == sizeof(std::ptrdiff_t), "Pointer and pointer difference must be the same size");
-	static_assert(sizeof(void *) == sizeof(void (*)()), "Code and data pointers must be the same size");
-	static_assert(std::is_polymorphic_v<Base>, "Base class must be polymorphic");
-
-	static constexpr std::size_t FIRST_OVERRIDABLE_MEMBER_OFFSET = std::has_virtual_destructor_v<Base> ? 2 : 0;
-	static constexpr std::size_t VIRTUAL_MEMBER_FUNCTION_COUNT = VirtualCount + FIRST_OVERRIDABLE_MEMBER_OFFSET;
-	static constexpr std::size_t VTABLE_SIZE = 2 + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
-
-	std::array<std::uintptr_t, VTABLE_SIZE> m_vtable;
-	std::bitset<VirtualCount> m_overridden;
-
 public:
 	/// \brief Type used to store base class and extra data
 	///
 	/// Has a member \c base of the base class type, and a member
 	/// \c extra of the extra data type if it is not \c void.
+	///
+	/// Provides \c resolve_base_member_function and
+	/// \c call_base_member_function member functions to assist with
+	/// calling the base implementation of overridden virtual member
+	/// functions.
 	using type = value_type<Base, Extra>;
 
 	/// \brief Smart pointer to instance
@@ -226,10 +323,27 @@ public:
 	void override_member_function(R (Base::*slot)(T...), R MAME_ABI_CXX_MEMBER_CALL (*func)(type &, T...));
 
 	template <typename R, typename... T>
+	void override_member_function(R (Base::*slot)(T...) const, R MAME_ABI_CXX_MEMBER_CALL (*func)(type const &, T...));
+
+	template <typename R, typename... T>
 	void restore_base_member_function(R (Base::*slot)(T...));
 
 	template <typename... T>
 	pointer instantiate(type *&object, T &&... args);
+
+private:
+	static_assert(sizeof(std::uintptr_t) == sizeof(std::ptrdiff_t), "Pointer and pointer difference must be the same size");
+	static_assert(sizeof(void *) == sizeof(void (*)()), "Code and data pointers must be the same size");
+	static_assert(std::is_polymorphic_v<Base>, "Base class must be polymorphic");
+
+	static constexpr std::size_t FIRST_OVERRIDABLE_MEMBER_OFFSET = std::has_virtual_destructor_v<Base> ? 2 : 0;
+	static constexpr std::size_t VIRTUAL_MEMBER_FUNCTION_COUNT = VirtualCount + FIRST_OVERRIDABLE_MEMBER_OFFSET;
+	static constexpr std::size_t VTABLE_SIZE = 2 + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
+
+	void override_member_function(member_function_pointer_equiv &slot, std::uintptr_t func);
+
+	std::array<std::uintptr_t, VTABLE_SIZE> m_vtable;
+	std::bitset<VirtualCount> m_overridden;
 };
 
 } // namespace util

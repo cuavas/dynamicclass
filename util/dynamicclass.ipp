@@ -12,6 +12,13 @@ namespace util {
 
 namespace detail {
 
+/// \brief Get offset to saved base virtual table pointer from type info
+///
+/// Gets the offset from the location of the type info for the dynamic
+/// derived class to the location of the saved base class virtual table
+/// pointer.
+/// \return Offset from the type info to saved base class virtual table
+///   pointer in bytes.
 inline std::ptrdiff_t dynamic_derived_class_base::base_vtable_offset()
 {
 	return
@@ -20,17 +27,93 @@ inline std::ptrdiff_t dynamic_derived_class_base::base_vtable_offset()
 }
 
 
-template <typename Base>
+/// \brief Get base class virtual table pointer
+///
+/// Gets the base class virtual pointer for an instance of a dynamic
+/// derived class.
+/// \tparam Base The base class type (usually determined automatically).
+/// \param [in] object Base class member of dynamic derived class
+///   instance.
+/// \return Pointer to first virtual member function entry in base class
+///   virtual table.
+template <class Base>
+inline std::uintptr_t const *dynamic_derived_class_base::get_base_vptr(
+		Base const &object)
+{
+	auto const vptr = *reinterpret_cast<uintptr_t const *>(&object);
+	auto const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
+	return *reinterpret_cast<uintptr_t const *const *>(typeinfo + base_vtable_offset());
+}
+
+
+/// \brief Restore base class virtual table pointer
+///
+/// Restores the base class virtual pointer in an instance of a dynamic
+/// derived class.  Must be called before calling the base class
+/// destructor.
+/// \tparam Base The base class type (usually determined automatically).
+/// \param [in,out] object Base class member of dynamic derived class
+///   instance.
+template <class Base>
 inline void dynamic_derived_class_base::restore_base_vptr(
 		Base &object)
 {
-	std::uintptr_t &vptr = *reinterpret_cast<uintptr_t *>(&object);
-	std::uintptr_t const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
+	auto &vptr = *reinterpret_cast<uintptr_t *>(&object);
+	auto const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
 	vptr = *reinterpret_cast<uintptr_t const *>(typeinfo + base_vtable_offset());
 	assert(reinterpret_cast<void const *>(vptr));
 }
 
 
+/// \brief Resolve pointer to base class member function
+///
+/// Given an instance and pointer to a base class member function, gets
+/// the adjusted \c this pointer and conventional function pointer.
+/// \tparam Base The base class type (usually determined automatically).
+/// \tparam R Return type of member function (usually determined
+/// automatically).
+/// \tparam T Parameter types expected by the member function (usually
+///   determined automatically).
+/// \param [in] object Base class member of dynamic derived class
+///   instance.
+/// \param [in] func Pointer to member function of base class.
+/// \return A \c std::pair containing the conventional function pointer
+///   and adjusted \c this pointer.
+template <typename Base, typename R, typename... T>
+inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> dynamic_derived_class_base::resolve_base_member_function(
+		Base &object,
+		R (Base::*func)(T...))
+{
+	member_function_pointer_pun_t<R (Base::*)(T...)> thunk;
+	thunk.ptr = func;
+	if (thunk.equiv.is_virtual())
+	{
+		assert(!thunk.equiv.this_pointer_offset());
+		auto const vptr = reinterpret_cast<std::uint8_t const *>(get_base_vptr(object));
+		auto const entryptr = reinterpret_cast<std::uintptr_t const *>(vptr + thunk.equiv.virtual_table_entry_offset());
+		return std::make_pair(
+				MAME_ABI_CXX_VTABLE_FNDESC
+					? reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(uintptr_t(entryptr))
+					: reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(*entryptr),
+				&object);
+	}
+	else
+	{
+		return std::make_pair(
+				reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(thunk.equiv.function_pointer()),
+				reinterpret_cast<std::uint8_t *>(&object) + thunk.equiv.this_pointer_offset());
+	}
+}
+
+
+/// \brief Complete object destructor for dynamic derived class
+///
+/// Restores the base class virtual table pointer, calls the extra data
+/// and base class destructors, but does not free the memory occupied by
+/// the object.  Used when the base class type has a virtual destructor
+/// to allow deleting instances of a dynamic derived class through
+/// pointers to the base class type.
+/// \param [in] object Reference to the object to destroy.
 template <class Base, typename Extra>
 void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra, std::enable_if_t<std::has_virtual_destructor_v<Base> > >::complete_object_destructor(
 		value_type<Base, Extra> &object)
@@ -40,6 +123,14 @@ void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra,
 }
 
 
+/// \brief Deleting destructor for dynamic derived class
+///
+/// Restores the base class virtual table pointer, calls the extra data
+/// and base class destructors, and frees the memory occupied by the
+/// object.  Used when the base class type has a virtual destructor to
+/// allow deleting instances of a dynamic derived class through pointers
+/// to the base class type.
+/// \param [in] object Pointer to the object to destroy.
 template <class Base, typename Extra>
 void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra, std::enable_if_t<std::has_virtual_destructor_v<Base> > >::deleting_destructor(
 		value_type<Base, Extra> *object)
@@ -49,6 +140,13 @@ void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra,
 }
 
 
+/// \brief Deleter for dynamic derived classes
+///
+/// Restores the base class virtual table pointer, calls the extra data
+/// and base class destructors, and frees the memory occupied by the
+/// object.  Used to delete instances of a dynamic derived class when
+/// the base class type does not have a virtual destructor.
+/// \param [in] object Pointer to the object to destroy.
 template <class Base, typename Extra>
 void dynamic_derived_class_base::destroyer<Base, Extra, std::enable_if_t<!std::has_virtual_destructor_v<Base> > >::operator()(
 		Base *object) const
@@ -144,7 +242,7 @@ dynamic_derived_class<Base, Extra, VirtualCount>::dynamic_derived_class(
 /// \tparam R Return type of member function to override (usually
 ///   determined automatically).
 /// \tparam T Parameter types expected by the member function to
-///   to override (usually determined automatically).
+///   override (usually determined automatically).
 /// \param [in] slot A pointer to the base class member function to
 ///   override.  Must be a pointer to a virtual member function.
 /// \param [in] func A pointer to the function to use to override the
@@ -156,42 +254,20 @@ void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
 		R (Base::*slot)(T...),
 		R MAME_ABI_CXX_MEMBER_CALL (*func)(type &, T...))
 {
-	static_assert(sizeof(slot) == sizeof(member_function_pointer_equiv), "Unsupported member function size");
-	union pointer_thunk
-	{
-		R (Base::*ptr)(T...);
-		member_function_pointer_equiv equiv;
-	};
-	pointer_thunk thunk;
+	member_function_pointer_pun_t<R (Base::*)(T...)> thunk;
 	thunk.ptr = slot;
-	if (MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_ARM)
-	{
-		assert(thunk.equiv.adj & 1);
-		assert(!(thunk.equiv.adj >> 1));
-	}
-	else
-	{
-		assert(thunk.equiv.ptr & 1);
-		assert(!thunk.equiv.adj);
-		thunk.equiv.ptr -= 1;
-	}
-	assert(!(thunk.equiv.ptr % sizeof(uintptr_t)));
-	assert(!((thunk.equiv.ptr / sizeof(uintptr_t)) % MEMBER_FUNCTION_SIZE));
-	std::size_t const index = thunk.equiv.ptr / sizeof(uintptr_t) / MEMBER_FUNCTION_SIZE;
-	assert(index < VIRTUAL_MEMBER_FUNCTION_COUNT);
-	assert(FIRST_OVERRIDABLE_MEMBER_OFFSET <= index);
-	m_overridden[index - FIRST_OVERRIDABLE_MEMBER_OFFSET] = true;
-	if (MAME_ABI_CXX_VTABLE_FNDESC)
-	{
-		std::copy_n(
-				reinterpret_cast<std::uintptr_t const *>(uintptr_t(func)),
-				MEMBER_FUNCTION_SIZE,
-				&m_vtable[2 + (thunk.equiv.ptr / sizeof(uintptr_t))]);
-	}
-	else
-	{
-		m_vtable[2 + index] = uintptr_t(func);
-	}
+	override_member_function(thunk.equiv, uintptr_t(func));
+}
+
+template <class Base, typename Extra, std::size_t VirtualCount>
+template <typename R, typename... T>
+void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
+		R (Base::*slot)(T...) const,
+		R MAME_ABI_CXX_MEMBER_CALL (*func)(type const &, T...))
+{
+	member_function_pointer_pun_t<R (Base::*)(T...) const> thunk;
+	thunk.ptr = slot;
+	override_member_function(thunk.equiv, uintptr_t(func));
 }
 
 
@@ -272,7 +348,7 @@ typename dynamic_derived_class<Base, Extra, VirtualCount>::pointer dynamic_deriv
 		T &&... args)
 {
 	std::unique_ptr<type> result(new type(std::forward<T>(args)...));
-	void const *&vptr = *reinterpret_cast<void const **>(&result->base);
+	auto &vptr = *reinterpret_cast<void const **>(&result->base);
 	if (!m_base_vtable)
 	{
 		assert(uintptr_t(result.get()) == uintptr_t(&result->base));
@@ -292,6 +368,45 @@ typename dynamic_derived_class<Base, Extra, VirtualCount>::pointer dynamic_deriv
 	vptr = &m_vtable[2];
 	object = result.get();
 	return pointer(&result.release()->base);
+}
+
+
+/// \brief Replace member function in virtual table
+///
+/// Does the actual work involved in replacing a virtual table entry to
+/// override a virtual member function of the base class, avoiding
+/// duplication between overloads.
+/// \param [in] slot Internal representation of pointer to a virtual
+///   member function of the base class.  May be modified.
+/// \param [in] func A pointer to the function to use to override the
+///   base class member function reinterpreted as an unsigned integer of
+///   equivalent size.
+template <class Base, typename Extra, std::size_t VirtualCount>
+inline void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
+		member_function_pointer_equiv &slot,
+		std::uintptr_t func)
+{
+	assert(slot.is_virtual());
+	assert(!slot.this_pointer_offset());
+	if (MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_STANDARD)
+		slot.ptr -= 1;
+	assert(!(slot.ptr % sizeof(uintptr_t)));
+	assert(!((slot.ptr / sizeof(uintptr_t)) % MEMBER_FUNCTION_SIZE));
+	std::size_t const index = slot.ptr / sizeof(uintptr_t) / MEMBER_FUNCTION_SIZE;
+	assert(index < VIRTUAL_MEMBER_FUNCTION_COUNT);
+	assert(FIRST_OVERRIDABLE_MEMBER_OFFSET <= index);
+	m_overridden[index - FIRST_OVERRIDABLE_MEMBER_OFFSET] = true;
+	if (MAME_ABI_CXX_VTABLE_FNDESC)
+	{
+		std::copy_n(
+				reinterpret_cast<std::uintptr_t const *>(func),
+				MEMBER_FUNCTION_SIZE,
+				&m_vtable[2 + (slot.ptr / sizeof(uintptr_t))]);
+	}
+	else
+	{
+		m_vtable[2 + index] = func;
+	}
 }
 
 } // namespace util

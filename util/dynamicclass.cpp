@@ -13,6 +13,9 @@ namespace detail {
 dynamic_derived_class_base::dynamic_derived_class_base(std::string_view name) :
 	m_base_vtable(nullptr)
 {
+	assert(!reinterpret_cast<void *>(uintptr_t(static_cast<void (*)()>(nullptr))));
+	assert(!reinterpret_cast<void (*)()>(uintptr_t(static_cast<void *>(nullptr))));
+
 	class base { };
 	class derived : base { };
 
