@@ -55,10 +55,34 @@ protected:
 	/// virtual table, as a multiple of the size of a pointer.
 	static constexpr std::size_t MEMBER_FUNCTION_SIZE = MAME_ABI_CXX_VTABLE_FNDESC ? MAME_ABI_FNDESC_SIZE : 1;
 
+	/// \brief Virtual table entries before first member function
+	///
+	/// The number of pointer-sized entries before the first entry that
+	/// is part of a member function representation.
+	///
+	/// For the MSVC C++ ABI, only one of these is an ABI requirement
+	/// (the pointer to the complete object locator).  The other isused
+	/// internally to allow the base virtual table pointer to be
+	/// recovered.
+	static constexpr std::size_t VTABLE_PREFIX_ENTRIES = (MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC) ? (1 + 1) : 2;
+
+	/// \brief Virtual table entries generated for a virtual destructor
+	///
+	/// The number of member function entries generated in the virtual
+	/// table for a virtual destructor.
+	static constexpr std::size_t VTABLE_DESTRUCTOR_ENTRIES = (MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC) ? 1 : 2;
+
+	/// \brief Virtual table index for base virtual table recovery
+	///
+	/// Index of the virtual table entry used for recovering the base
+	/// class virtual table pointer, relative to the location an
+	/// instance virtual table pointer points to.
+	static constexpr std::ptrdiff_t VTABLE_BASE_RECOVERY_INDEX = (MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC) ? -2 : -1;
+
 	/// \brief Single inheritance class type info equivalent structure
 	///
 	/// Structure equivalent to the implementation of std::type_info for
-	/// a class with a single direct base class.
+	/// a class with a single direct base class for the Itanium C++ ABI.
 	struct itanium_si_class_type_info_equiv
 	{
 		void const *vptr;                   ///< Pointer to single inheritance class type info virtual table
@@ -72,8 +96,8 @@ protected:
 	/// member function for the Itanium C++ ABI.
 	struct itanium_member_function_pointer_equiv
 	{
-		uintptr_t ptr;   ///< Function pointer or virtual table index
-		ptrdiff_t adj;   ///< Offset to add to \c this pointer before call
+		uintptr_t ptr;      ///< Function pointer or virtual table index
+		ptrdiff_t adj;      ///< Offset to add to \c this pointer before call
 
 		constexpr bool is_virtual() const
 		{
@@ -197,8 +221,11 @@ protected:
 	{
 		using pointer_type = std::unique_ptr<Base>;
 
-		static void MAME_ABI_CXX_MEMBER_CALL complete_object_destructor(value_type<Base, Extra> &object);
-		static void MAME_ABI_CXX_MEMBER_CALL deleting_destructor(value_type<Base, Extra> *object);
+		static void MAME_ABI_CXX_MEMBER_CALL complete_object_destructor(
+				value_type<Base, Extra> &object);
+
+		static void MAME_ABI_CXX_MEMBER_CALL deleting_destructor(
+				value_type<Base, Extra> *object);
 	};
 
 	/// \brief Destroyer for base classes without virtual destructors
@@ -336,9 +363,9 @@ private:
 	static_assert(sizeof(void *) == sizeof(void (*)()), "Code and data pointers must be the same size");
 	static_assert(std::is_polymorphic_v<Base>, "Base class must be polymorphic");
 
-	static constexpr std::size_t FIRST_OVERRIDABLE_MEMBER_OFFSET = std::has_virtual_destructor_v<Base> ? 2 : 0;
+	static constexpr std::size_t FIRST_OVERRIDABLE_MEMBER_OFFSET = std::has_virtual_destructor_v<Base> ? VTABLE_DESTRUCTOR_ENTRIES : 0;
 	static constexpr std::size_t VIRTUAL_MEMBER_FUNCTION_COUNT = VirtualCount + FIRST_OVERRIDABLE_MEMBER_OFFSET;
-	static constexpr std::size_t VTABLE_SIZE = 2 + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
+	static constexpr std::size_t VTABLE_SIZE = VTABLE_PREFIX_ENTRIES + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
 
 	void override_member_function(itanium_member_function_pointer_equiv &slot, std::uintptr_t func);
 

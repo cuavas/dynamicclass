@@ -37,13 +37,14 @@ void simple_extender_test()
 
 	simple_extender::type *simple;
 
-	printf("Creating extension class test1\n");
-	auto test1 = std::make_unique<simple_extender>("test1");
+	printf("Creating extension class test::a\n");
+	auto test1 = std::make_unique<simple_extender>("test::a");
+	printf("Type info @%p name: %s\n", &test1->type_info(), test1->type_info().name());
 
-	printf("Overriding void x(int) in test1\n");
+	printf("Overriding void x(int) in test::a\n");
 	test1->override_member_function(&virtual_destructor_base::x, &simple_override);
 
-	printf("Creating instance i1 of class test1\n");
+	printf("Creating instance i1 of class test::a\n");
 	auto i1 = test1->instantiate(simple);
 	printf("i1 @%p, extended storage @%p\n", i1.get(), simple);
 	printf("typeid(i1) == typeid(virtual_destructor_base): %d\n", typeid(*i1) == typeid(virtual_destructor_base));
@@ -56,11 +57,12 @@ void simple_extender_test()
 	printf("i1->y(5): ");
 	i1->y(5);
 
-	printf("Creating extension class test2 using prototype test1\n");
-	auto test2 = std::make_unique<simple_extender>(*test1, "test2");
-	printf("test_2.type_info() == test1.type_info(): %d\n", test2->type_info() == test1->type_info());
+	printf("Creating extension class test::b using prototype test::a\n");
+	auto test2 = std::make_unique<simple_extender>(*test1, "test::b");
+	printf("Type info @%p name: %s\n", &test2->type_info(), test2->type_info().name());
+	printf("test::b.type_info() == test::a.type_info(): %d\n", test2->type_info() == test1->type_info());
 
-	printf("Creating instance i2 of class test2\n");
+	printf("Creating instance i2 of class test::b\n");
 	auto i2 = test2->instantiate(simple);
 	printf("i2 @%p, extended storage @%p\n", i2.get(), simple);
 	printf("typeid(i2) == typeid(i1): %d\n", typeid(*i2) == typeid(*i1));
@@ -73,7 +75,7 @@ void simple_extender_test()
 	printf("i2->y(7): ");
 	i2->y(7);
 
-	printf("Overriding void y(int) in test1\n");
+	printf("Overriding void y(int) in test::a\n");
 	test1->override_member_function(&virtual_destructor_base::y, &simple_override);
 	printf("i1->x(9): ");
 	i1->x(9);
@@ -84,7 +86,7 @@ void simple_extender_test()
 	printf("i2->y(6): ");
 	i2->y(6);
 
-	printf("Restoring virtual_destructor_base::x in test2\n");
+	printf("Restoring virtual_destructor_base::x in test::b\n");
 	test2->restore_base_member_function(&virtual_destructor_base::x);
 	printf("i1->x(4): ");
 	i1->x(4);
@@ -95,9 +97,9 @@ void simple_extender_test()
 	printf("i2->y(7): ");
 	i2->y(7);
 
-	printf("Restoring virtual_destructor_base::x in test1\n");
+	printf("Restoring virtual_destructor_base::x in test::a\n");
 	test1->restore_base_member_function(&virtual_destructor_base::x);
-	printf("Overriding void x(int) in test2\n");
+	printf("Overriding void x(int) in test::b\n");
 	test2->override_member_function(&virtual_destructor_base::x, &simple_override);
 	printf("i1->x(4): ");
 	i1->x(4);
@@ -108,7 +110,7 @@ void simple_extender_test()
 	printf("i2->y(7): ");
 	i2->y(7);
 
-	printf("Destroying i1 and test1\n");
+	printf("Destroying i1 and test::a\n");
 	i1.reset();
 	test1.reset();
 	printf("i2->x(6): ");
@@ -116,7 +118,7 @@ void simple_extender_test()
 	printf("i2->y(7): ");
 	i2->y(7);
 
-	printf("Destroying i2 and test2\n");
+	printf("Destroying i2 and test::b\n");
 	i2.reset();
 	test2.reset();
 }
@@ -137,6 +139,7 @@ void extra_data_extender_test()
 
 	printf("Creating extension class test1 and overriding y(int)\n");
 	auto test1 = std::make_unique<extra_data_extender>("test1");
+	printf("Type info @%p name: %s\n", &test1->type_info(), test1->type_info().name());
 	test1->override_member_function(&virtual_destructor_base::y, &extra_data_override);
 
 	printf("Creating instance i1 of class test1 with extra data 69\n");

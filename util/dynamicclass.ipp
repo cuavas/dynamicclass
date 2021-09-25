@@ -14,9 +14,9 @@ namespace detail {
 
 /// \brief Get offset to saved base virtual table pointer from type info
 ///
-/// Gets the offset from the location of the type info for the dynamic
-/// derived class to the location of the saved base class virtual table
-/// pointer.
+/// Gets the offset to the saved base class virtual table pointer from
+/// the location the dynamic derived class virtual table entry used for
+/// recovery points to.
 /// \return Offset from the type info to saved base class virtual table
 ///   pointer in bytes.
 inline std::ptrdiff_t dynamic_derived_class_base::base_vtable_offset()
@@ -41,8 +41,8 @@ inline std::uintptr_t const *dynamic_derived_class_base::get_base_vptr(
 		Base const &object)
 {
 	auto const vptr = *reinterpret_cast<uintptr_t const *>(&object);
-	auto const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
-	return *reinterpret_cast<uintptr_t const *const *>(typeinfo + base_vtable_offset());
+	auto const recovery = reinterpret_cast<uintptr_t const *>(vptr)[VTABLE_BASE_RECOVERY_INDEX];
+	return *reinterpret_cast<uintptr_t const *const *>(recovery + base_vtable_offset());
 }
 
 
@@ -59,8 +59,8 @@ inline void dynamic_derived_class_base::restore_base_vptr(
 		Base &object)
 {
 	auto &vptr = *reinterpret_cast<uintptr_t *>(&object);
-	auto const typeinfo = reinterpret_cast<uintptr_t const *>(vptr)[-1];
-	vptr = *reinterpret_cast<uintptr_t const *>(typeinfo + base_vtable_offset());
+	auto const recovery = reinterpret_cast<uintptr_t const *>(vptr)[VTABLE_BASE_RECOVERY_INDEX];
+	vptr = *reinterpret_cast<uintptr_t const *>(recovery + base_vtable_offset());
 	assert(reinterpret_cast<void const *>(vptr));
 }
 
@@ -113,6 +113,8 @@ inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> dynamic_d
 /// the object.  Used when the base class type has a virtual destructor
 /// to allow deleting instances of a dynamic derived class through
 /// pointers to the base class type.
+///
+/// Only used for the Itanium C++ ABI.
 /// \param [in] object Reference to the object to destroy.
 template <class Base, typename Extra>
 void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra, std::enable_if_t<std::has_virtual_destructor_v<Base> > >::complete_object_destructor(
@@ -130,6 +132,8 @@ void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra,
 /// object.  Used when the base class type has a virtual destructor to
 /// allow deleting instances of a dynamic derived class through pointers
 /// to the base class type.
+///
+/// Only used for the Itanium C++ ABI.
 /// \param [in] object Pointer to the object to destroy.
 template <class Base, typename Extra>
 void MAME_ABI_CXX_MEMBER_CALL dynamic_derived_class_base::destroyer<Base, Extra, std::enable_if_t<std::has_virtual_destructor_v<Base> > >::deleting_destructor(
@@ -179,29 +183,22 @@ dynamic_derived_class<Base, Extra, VirtualCount>::dynamic_derived_class(
 			std::copy_n(
 					reinterpret_cast<std::uintptr_t const *>(std::uintptr_t(&destroyer<Base, Extra>::complete_object_destructor)),
 					MEMBER_FUNCTION_SIZE,
-					&m_vtable[2]);
+					&m_vtable[VTABLE_PREFIX_ENTRIES]);
 			std::copy_n(
 					reinterpret_cast<std::uintptr_t const *>(std::uintptr_t(&destroyer<Base, Extra>::deleting_destructor)),
 					MEMBER_FUNCTION_SIZE,
-					&m_vtable[2 + MEMBER_FUNCTION_SIZE]);
+					&m_vtable[VTABLE_PREFIX_ENTRIES + MEMBER_FUNCTION_SIZE]);
 		}
 		else
 		{
-			m_vtable[2] = std::uintptr_t(&destroyer<Base, Extra>::complete_object_destructor);
-			m_vtable[3] = std::uintptr_t(&destroyer<Base, Extra>::deleting_destructor);
+			m_vtable[VTABLE_PREFIX_ENTRIES] = std::uintptr_t(&destroyer<Base, Extra>::complete_object_destructor);
+			m_vtable[VTABLE_PREFIX_ENTRIES + 1] = std::uintptr_t(&destroyer<Base, Extra>::deleting_destructor);
 		}
-		std::fill(
-				std::next(m_vtable.begin(), 2 + (2 * MEMBER_FUNCTION_SIZE)),
-				m_vtable.end(),
-				std::uintptr_t(static_cast<void *>(nullptr)));
 	}
-	else
-	{
-		std::fill(
-				std::next(m_vtable.begin(), 2),
-				m_vtable.end(),
-				std::uintptr_t(static_cast<void *>(nullptr)));
-	}
+	std::fill(
+			std::next(m_vtable.begin(), VTABLE_PREFIX_ENTRIES + (VTABLE_DESTRUCTOR_ENTRIES * MEMBER_FUNCTION_SIZE)),
+			m_vtable.end(),
+			std::uintptr_t(static_cast<void *>(nullptr)));
 }
 
 
@@ -313,7 +310,7 @@ void dynamic_derived_class<Base, Extra, VirtualCount>::restore_base_member_funct
 		std::copy_n(
 				reinterpret_cast<std::uintptr_t const *>(m_base_vtable) + (thunk.equiv.ptr / sizeof(uintptr_t)),
 				MEMBER_FUNCTION_SIZE,
-				&m_vtable[2 + (thunk.equiv.ptr / sizeof(uintptr_t))]);
+				&m_vtable[VTABLE_PREFIX_ENTRIES + (thunk.equiv.ptr / sizeof(uintptr_t))]);
 	}
 	m_overridden[index - FIRST_OVERRIDABLE_MEMBER_OFFSET] = false;
 }
@@ -342,7 +339,7 @@ typename dynamic_derived_class<Base, Extra, VirtualCount>::pointer dynamic_deriv
 		T &&... args)
 {
 	std::unique_ptr<type> result(new type(std::forward<T>(args)...));
-	auto &vptr = *reinterpret_cast<void const **>(&result->base);
+	auto &vptr = *reinterpret_cast<uintptr_t const **>(&result->base);
 	if (!m_base_vtable)
 	{
 		assert(uintptr_t(result.get()) == uintptr_t(&result->base));
@@ -352,14 +349,11 @@ typename dynamic_derived_class<Base, Extra, VirtualCount>::pointer dynamic_deriv
 			if (!m_overridden[i])
 			{
 				std::size_t const offset = (i + FIRST_OVERRIDABLE_MEMBER_OFFSET) * MEMBER_FUNCTION_SIZE;
-				std::copy_n(
-						reinterpret_cast<uintptr_t const *>(vptr) + offset,
-						MEMBER_FUNCTION_SIZE,
-						&m_vtable[2 + offset]);
+				std::copy_n(vptr + offset, MEMBER_FUNCTION_SIZE, &m_vtable[VTABLE_PREFIX_ENTRIES + offset]);
 			}
 		}
 	}
-	vptr = &m_vtable[2];
+	vptr = &m_vtable[VTABLE_PREFIX_ENTRIES];
 	object = result.get();
 	return pointer(&result.release()->base);
 }
@@ -395,11 +389,11 @@ inline void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_fu
 		std::copy_n(
 				reinterpret_cast<std::uintptr_t const *>(func),
 				MEMBER_FUNCTION_SIZE,
-				&m_vtable[2 + (slot.ptr / sizeof(uintptr_t))]);
+				&m_vtable[VTABLE_PREFIX_ENTRIES + (slot.ptr / sizeof(uintptr_t))]);
 	}
 	else
 	{
-		m_vtable[2 + index] = func;
+		m_vtable[VTABLE_PREFIX_ENTRIES + index] = func;
 	}
 }
 
