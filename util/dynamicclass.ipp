@@ -84,7 +84,7 @@ inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> dynamic_d
 		Base &object,
 		R (Base::*func)(T...))
 {
-	member_function_pointer_pun_t<R (Base::*)(T...)> thunk;
+	member_function_pointer_pun_t<decltype(func)> thunk;
 	thunk.ptr = func;
 	if (thunk.equiv.is_virtual())
 	{
@@ -254,7 +254,7 @@ void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
 		R (Base::*slot)(T...),
 		R MAME_ABI_CXX_MEMBER_CALL (*func)(type &, T...))
 {
-	member_function_pointer_pun_t<R (Base::*)(T...)> thunk;
+	member_function_pointer_pun_t<decltype(slot)> thunk;
 	thunk.ptr = slot;
 	override_member_function(thunk.equiv, uintptr_t(func));
 }
@@ -265,7 +265,7 @@ void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
 		R (Base::*slot)(T...) const,
 		R MAME_ABI_CXX_MEMBER_CALL (*func)(type const &, T...))
 {
-	member_function_pointer_pun_t<R (Base::*)(T...) const> thunk;
+	member_function_pointer_pun_t<decltype(slot)> thunk;
 	thunk.ptr = slot;
 	override_member_function(thunk.equiv, uintptr_t(func));
 }
@@ -290,13 +290,7 @@ template <typename R, typename... T>
 void dynamic_derived_class<Base, Extra, VirtualCount>::restore_base_member_function(
 		R (Base::*slot)(T...))
 {
-	static_assert(sizeof(slot) == sizeof(member_function_pointer_equiv), "Unsupported member function size");
-	union pointer_thunk
-	{
-		R (Base::*ptr)(T...);
-		member_function_pointer_equiv equiv;
-	};
-	pointer_thunk thunk;
+	member_function_pointer_pun_t<decltype(slot)>  thunk;
 	thunk.ptr = slot;
 	if (MAME_ABI_CXX_ITANIUM_MFP_TYPE == MAME_ABI_CXX_ITANIUM_MFP_ARM)
 	{
@@ -383,7 +377,7 @@ typename dynamic_derived_class<Base, Extra, VirtualCount>::pointer dynamic_deriv
 ///   equivalent size.
 template <class Base, typename Extra, std::size_t VirtualCount>
 inline void dynamic_derived_class<Base, Extra, VirtualCount>::override_member_function(
-		member_function_pointer_equiv &slot,
+		itanium_member_function_pointer_equiv &slot,
 		std::uintptr_t func)
 {
 	assert(slot.is_virtual());

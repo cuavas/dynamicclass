@@ -69,8 +69,8 @@ protected:
 	/// \brief Member function pointer equivalent structure
 	///
 	/// Structure equivalent to the representation of a pointer to a
-	/// member function.
-	struct member_function_pointer_equiv
+	/// member function for the Itanium C++ ABI.
+	struct itanium_member_function_pointer_equiv
 	{
 		uintptr_t ptr;   ///< Function pointer or virtual table index
 		ptrdiff_t adj;   ///< Offset to add to \c this pointer before call
@@ -101,12 +101,12 @@ protected:
 	template <typename T>
 	struct member_function_pointer_pun
 	{
-		static_assert(sizeof(T) == sizeof(member_function_pointer_equiv), "Unsupported member function pointer representation");
+		static_assert(sizeof(T) == sizeof(itanium_member_function_pointer_equiv), "Unsupported member function pointer representation");
 
 		union type
 		{
 			T ptr;
-			member_function_pointer_equiv equiv;
+			itanium_member_function_pointer_equiv equiv;
 		};
 	};
 
@@ -340,7 +340,7 @@ private:
 	static constexpr std::size_t VIRTUAL_MEMBER_FUNCTION_COUNT = VirtualCount + FIRST_OVERRIDABLE_MEMBER_OFFSET;
 	static constexpr std::size_t VTABLE_SIZE = 2 + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
 
-	void override_member_function(member_function_pointer_equiv &slot, std::uintptr_t func);
+	void override_member_function(itanium_member_function_pointer_equiv &slot, std::uintptr_t func);
 
 	std::array<std::uintptr_t, VTABLE_SIZE> m_vtable;
 	std::bitset<VirtualCount> m_overridden;
