@@ -8,10 +8,25 @@
 /// class member functions can be changed even while instances exist.
 /// This is particularly useful in conjunction with code generation.
 ///
-/// Only implemented for Itanium C++ ABI in configurations where it is
-/// possible to define a non-member function that uses the same calling
-/// convention as a non-static member function, and subject to a number
-/// of limitations on classes that can be used as base classes.
+/// Only implemented for configurations where it is possible to define a
+/// non-member function that uses the same calling convention as a
+/// non-static member function, and subject to a number of limitations
+/// on classes that can be used as base classes.
+///
+/// Itanium C++ ABI support is reasonably complete.
+///
+/// MSVC C++ABI support is subject to additional limitations:
+/// * Instances of dynamic derived classes appear to be instance of
+///   their respective base classes when subject to RTTI introspection.
+/// * Member functions returning class, structure or union types cannot
+///   be overridden.
+/// * Member functions returning scalar types that are not returned in
+///   registers cannot be overridden.
+/// * Base class implementations of virtual member functions cannot be
+///   called.
+/// * Member functions cannot be overridden for classes built with clang
+///   with optimisation disabled.
+/// * Only x86-64 targets are supported.
 ///
 /// It goes without saying that this is not something you are supposed
 /// to do.  This depends heavily on implementation details, and careful
@@ -122,15 +137,66 @@ protected:
 		}
 	};
 
+	/// \brief Type info class equivalent structure
+	///
+	/// Structure equivalent to the implementation of std::type_info for
+	/// the MSVC C++ ABI.  The structure is followed immediately by the
+	/// decorated name.  The pointer to the undecorated name is normally
+	/// populated lazily when the \c name member function is called.
+	struct msvc_type_info_equiv
+	{
+		void const *vptr;           ///< Pointer to virtual table
+		char const *undecorated;    ///< Pointer to the undecorated name
+		char decorated[1];          ///< First character of the decorated name
+	};
+
+	/// \brief Single inheritance member function pointer equivalent
+	///
+	/// Structure equivalent to the representation of a pointer to a
+	/// member function of a single inheritance class for the MSVC C++
+	/// ABI.
+	struct msvc_si_member_function_pointer_equiv
+	{
+		uintptr_t ptr;      ///< Pointer to function, PLT entry, or virtual member call thunk
+	};
+
+	/// \brief Multiple inheritance member function pointer equivalent
+	///
+	/// Structure equivalent to the representation of a pointer to a
+	/// member function of a Multiple inheritance class for the MSVC C++
+	/// ABI.
+	struct msvc_mi_member_function_pointer_equiv : msvc_si_member_function_pointer_equiv
+	{
+		int adj;            ///< Offset to \c this pointer to add before call
+	};
+
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+	using member_function_pointer_equiv = msvc_mi_member_function_pointer_equiv;
+
+	template <typename T>
+	using supported_return_type = std::bool_constant<std::is_void_v<T> || std::is_scalar_v<T> || std::is_reference_v<T> >;
+#else
+	using member_function_pointer_equiv = itanium_member_function_pointer_equiv;
+
+	template <typename T>
+	using supported_return_type = std::true_type;
+#endif
+
 	template <typename T>
 	struct member_function_pointer_pun
 	{
-		static_assert(sizeof(T) == sizeof(itanium_member_function_pointer_equiv), "Unsupported member function pointer representation");
+		static_assert(
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+				(sizeof(T) == sizeof(msvc_si_member_function_pointer_equiv)) || (sizeof(T) == sizeof(msvc_mi_member_function_pointer_equiv)),
+#else
+				sizeof(T) == sizeof(itanium_member_function_pointer_equiv),
+#endif
+				"Unsupported member function pointer representation");
 
 		union type
 		{
 			T ptr;
-			itanium_member_function_pointer_equiv equiv;
+			member_function_pointer_equiv equiv;
 		};
 	};
 
@@ -165,6 +231,7 @@ protected:
 		{
 		}
 
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 		template <typename R, typename... T>
 		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
 				R (Base::*func)(T...))
@@ -178,6 +245,7 @@ protected:
 			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
 			return resolved.first(resolved.second, std::forward<T>(args)...);
 		}
+#endif
 
 		Base base;
 		Extra extra;
@@ -189,6 +257,7 @@ protected:
 	public:
 		template <typename... T> value_type(T &&... args) : base(std::forward<T>(args)...) { }
 
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 		template <typename R, typename... T>
 		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
 				R (Base::*func)(T...))
@@ -202,6 +271,7 @@ protected:
 			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
 			return resolved.first(resolved.second, std::forward<T>(args)...);
 		}
+#endif
 
 		Base base;
 	};
@@ -226,6 +296,10 @@ protected:
 
 		static void MAME_ABI_CXX_MEMBER_CALL deleting_destructor(
 				value_type<Base, Extra> *object);
+
+		static void *MAME_ABI_CXX_MEMBER_CALL scalar_deleting_destructor(
+				value_type<Base, Extra> *object,
+				unsigned int flags);
 	};
 
 	/// \brief Destroyer for base classes without virtual destructors
@@ -247,21 +321,29 @@ protected:
 
 	dynamic_derived_class_base(std::string_view name);
 
+	static std::size_t resolve_virtual_member_slot(member_function_pointer_equiv &slot, std::size_t size);
+
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+	msvc_type_info_equiv *m_type_info;
+#else
 	itanium_si_class_type_info_equiv m_type_info;   ///< Type info for the dynamic derived class
-	std::string m_name;                             ///< Storage for the mangled class name
+#endif
+	std::string m_name;                             ///< Storage for the class name (mangled for Itanium, undecorated for MSVC)
 	void const *m_base_vtable;                      ///< Saved base class virtual table pointer
 
 private:
 	static std::ptrdiff_t base_vtable_offset();
 
 	template <typename Base>
-	static uintptr_t const *get_base_vptr(Base const &object);
+	static std::uintptr_t const *get_base_vptr(Base const &object);
 
 	template <typename Base>
 	static void restore_base_vptr(Base &object);
 
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 	template <typename Base, typename R, typename... T>
 	static std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(Base &object, R (Base::*func)(T...));
+#endif
 };
 
 } // namespace detail
@@ -343,7 +425,11 @@ public:
 	/// \return A reference to an object equivalent to \c std::type_info.
 	std::type_info const &type_info() const
 	{
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+		return *reinterpret_cast<std::type_info const *>(m_type_info);
+#else
 		return *reinterpret_cast<std::type_info const *>(&m_type_info);
+#endif
 	}
 
 	template <typename R, typename... T>
@@ -367,7 +453,7 @@ private:
 	static constexpr std::size_t VIRTUAL_MEMBER_FUNCTION_COUNT = VirtualCount + FIRST_OVERRIDABLE_MEMBER_OFFSET;
 	static constexpr std::size_t VTABLE_SIZE = VTABLE_PREFIX_ENTRIES + (VIRTUAL_MEMBER_FUNCTION_COUNT * MEMBER_FUNCTION_SIZE);
 
-	void override_member_function(itanium_member_function_pointer_equiv &slot, std::uintptr_t func);
+	void override_member_function(member_function_pointer_equiv &slot, std::uintptr_t func, std::size_t size);
 
 	std::array<std::uintptr_t, VTABLE_SIZE> m_vtable;
 	std::bitset<VirtualCount> m_overridden;

@@ -17,7 +17,7 @@ public:
 class non_virtual_destructor_base
 {
 public:
-	virtual ~non_virtual_destructor_base() { printf("calling b(4) from non_virtual_destructor_base::~virtual_destructor_base: "); b(4); }
+	~non_virtual_destructor_base() { printf("calling b(4) from non_virtual_destructor_base::~virtual_destructor_base: "); b(4); }
 	virtual int a(int i) const { printf("non_virtual_destructor_base::a(%d)\n", i); return i + 1; }
 	virtual int b(int i) { printf("non_virtual_destructor_base::b(%d)\n", i); return i + 2; }
 	virtual int c(int i) { printf("non_virtual_destructor_base::c(%d)\n", i); return i + 3; }
@@ -194,7 +194,9 @@ struct metaclass
 void MAME_ABI_CXX_MEMBER_CALL class_referencing_override(class_referencing_extender::type &obj, int i)
 {
 	printf("class_referencing_override(%p, %d) calling base::x(i): ", &obj, i);
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 	obj.call_base_member_function(&virtual_destructor_base::x, i);
+#endif
 }
 
 void class_referencing_extender_test()
