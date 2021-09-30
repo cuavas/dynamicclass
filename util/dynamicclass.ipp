@@ -69,7 +69,6 @@ inline void dynamic_derived_class_base::restore_base_vptr(
 }
 
 
-#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 /// \brief Resolve pointer to base class member function
 ///
 /// Given an instance and pointer to a base class member function, gets
@@ -84,13 +83,28 @@ inline void dynamic_derived_class_base::restore_base_vptr(
 /// \param [in] func Pointer to member function of base class.
 /// \return A \c std::pair containing the conventional function pointer
 ///   and adjusted \c this pointer.
+/// \exception std::invalid_argument Thrown if the \func argument is not
+///   a supported member function.  This includes non-virtual member
+///   functions and virtual member functions that aren't supported for
+///   overriding when using the MSVC C++ ABI.
 template <typename Base, typename R, typename... T>
 inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> dynamic_derived_class_base::resolve_base_member_function(
 		Base &object,
 		R (Base::*func)(T...))
 {
+	static_assert(supported_return_type<R>::value, "Unsupported member function return type");
 	member_function_pointer_pun_t<decltype(func)> thunk;
 	thunk.ptr = func;
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+	std::size_t const index = resolve_virtual_member_slot(thunk.equiv, sizeof(func));
+	auto const vptr = reinterpret_cast<std::uintptr_t const *>(get_base_vptr(object));
+	std::uintptr_t const* const entryptr = vptr + (index * MEMBER_FUNCTION_SIZE);
+	return std::make_pair(
+				MAME_ABI_CXX_VTABLE_FNDESC
+					? reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(std::uintptr_t(entryptr))
+					: reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(*entryptr),
+				&object);
+#else
 	if (thunk.equiv.is_virtual())
 	{
 		assert(!thunk.equiv.this_pointer_offset());
@@ -108,8 +122,46 @@ inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> dynamic_d
 				reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...)>(thunk.equiv.function_pointer()),
 				reinterpret_cast<std::uint8_t *>(&object) + thunk.equiv.this_pointer_offset());
 	}
-}
 #endif
+}
+
+template <typename Base, typename R, typename... T>
+inline std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...), void const *> dynamic_derived_class_base::resolve_base_member_function(
+		Base const &object,
+		R (Base::*func)(T...) const)
+{
+	static_assert(supported_return_type<R>::value, "Unsupported member function return type");
+	member_function_pointer_pun_t<decltype(func)> thunk;
+	thunk.ptr = func;
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+	std::size_t const index = resolve_virtual_member_slot(thunk.equiv, sizeof(func));
+	auto const vptr = reinterpret_cast<std::uintptr_t const *>(get_base_vptr(object));
+	std::uintptr_t const* const entryptr = vptr + (index * MEMBER_FUNCTION_SIZE);
+	return std::make_pair(
+				MAME_ABI_CXX_VTABLE_FNDESC
+					? reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...)>(std::uintptr_t(entryptr))
+					: reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...)>(*entryptr),
+				&object);
+#else
+	if (thunk.equiv.is_virtual())
+	{
+		assert(!thunk.equiv.this_pointer_offset());
+		auto const vptr = reinterpret_cast<std::uint8_t const *>(get_base_vptr(object));
+		auto const entryptr = reinterpret_cast<std::uintptr_t const *>(vptr + thunk.equiv.virtual_table_entry_offset());
+		return std::make_pair(
+				MAME_ABI_CXX_VTABLE_FNDESC
+					? reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...)>(std::uintptr_t(entryptr))
+					: reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...)>(*entryptr),
+				&object);
+	}
+	else
+	{
+		return std::make_pair(
+				reinterpret_cast<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...)>(thunk.equiv.function_pointer()),
+				reinterpret_cast<std::uint8_t const *>(&object) + thunk.equiv.this_pointer_offset());
+	}
+#endif
+}
 
 
 /// \brief Complete object destructor for dynamic derived class

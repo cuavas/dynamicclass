@@ -194,9 +194,7 @@ struct metaclass
 void MAME_ABI_CXX_MEMBER_CALL class_referencing_override(class_referencing_extender::type &obj, int i)
 {
 	printf("class_referencing_override(%p, %d) calling base::x(i): ", &obj, i);
-#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 	obj.call_base_member_function(&virtual_destructor_base::x, i);
-#endif
 }
 
 void class_referencing_extender_test()
@@ -227,8 +225,8 @@ using non_virtual_destructor_extender = util::dynamic_derived_class<non_virtual_
 
 int MAME_ABI_CXX_MEMBER_CALL non_virtual_destructor_const_override(non_virtual_destructor_extender::type const &object, int i)
 {
-	printf("non_virtual_destructor_const_override(%p, %d)\n", &object, i);
-	return -i;
+	printf("non_virtual_destructor_const_override(%p, %d) calling base::a(-i): ", &object, i);
+	return object.call_base_member_function(&non_virtual_destructor_base::a, -i);
 }
 
 int MAME_ABI_CXX_MEMBER_CALL non_virtual_destructor_override(non_virtual_destructor_extender::type &object, int i)

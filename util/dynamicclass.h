@@ -22,10 +22,14 @@
 ///   be overridden.
 /// * Member functions returning scalar types that are not returned in
 ///   registers cannot be overridden.
-/// * Base class implementations of virtual member functions cannot be
-///   called.
 /// * Member functions cannot be overridden for classes built with clang
 ///   with optimisation disabled.
+/// * Base class implementations of member functions can only be
+///   resolved if they are virtual member functions that can be
+///   overridden.
+/// * Overriding member functions and resolving base class
+///   implementations of member functions is substantially more
+///   expensive than for the Itanium C++ ABI.
 /// * Only x86-64 targets are supported.
 ///
 /// It goes without saying that this is not something you are supposed
@@ -231,10 +235,16 @@ protected:
 		{
 		}
 
-#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 		template <typename R, typename... T>
 		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
 				R (Base::*func)(T...))
+		{
+			return dynamic_derived_class_base::resolve_base_member_function(base, func);
+		}
+
+		template <typename R, typename... T>
+		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...), void const *> resolve_base_member_function(
+				R (Base::*func)(T...) const) const
 		{
 			return dynamic_derived_class_base::resolve_base_member_function(base, func);
 		}
@@ -245,7 +255,13 @@ protected:
 			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
 			return resolved.first(resolved.second, std::forward<T>(args)...);
 		}
-#endif
+
+		template <typename R, typename... T>
+		R call_base_member_function(R (Base::*func)(T...) const, T... args) const
+		{
+			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
+			return resolved.first(resolved.second, std::forward<T>(args)...);
+		}
 
 		Base base;
 		Extra extra;
@@ -257,10 +273,16 @@ protected:
 	public:
 		template <typename... T> value_type(T &&... args) : base(std::forward<T>(args)...) { }
 
-#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 		template <typename R, typename... T>
 		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
 				R (Base::*func)(T...))
+		{
+			return dynamic_derived_class_base::resolve_base_member_function(base, func);
+		}
+
+		template <typename R, typename... T>
+		std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...), void const *> resolve_base_member_function(
+				R (Base::*func)(T...) const) const
 		{
 			return dynamic_derived_class_base::resolve_base_member_function(base, func);
 		}
@@ -271,7 +293,13 @@ protected:
 			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
 			return resolved.first(resolved.second, std::forward<T>(args)...);
 		}
-#endif
+
+		template <typename R, typename... T>
+		R call_base_member_function(R (Base::*func)(T...) const, T... args) const
+		{
+			auto const resolved = dynamic_derived_class_base::resolve_base_member_function(base, func);
+			return resolved.first(resolved.second, std::forward<T>(args)...);
+		}
 
 		Base base;
 	};
@@ -340,10 +368,15 @@ private:
 	template <typename Base>
 	static void restore_base_vptr(Base &object);
 
-#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_ITANIUM
 	template <typename Base, typename R, typename... T>
-	static std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(Base &object, R (Base::*func)(T...));
-#endif
+	static std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void *, T...), void *> resolve_base_member_function(
+			Base &object,
+			R (Base::*func)(T...));
+
+	template <typename Base, typename R, typename... T>
+	static std::pair<R MAME_ABI_CXX_MEMBER_CALL (*)(void const *, T...), void const *> resolve_base_member_function(
+			Base const &object,
+			R (Base::*func)(T...) const);
 };
 
 } // namespace detail
