@@ -141,18 +141,8 @@ protected:
 		}
 	};
 
-	/// \brief Type info class equivalent structure
-	///
-	/// Structure equivalent to the implementation of std::type_info for
-	/// the MSVC C++ ABI.  The structure is followed immediately by the
-	/// decorated name.  The pointer to the undecorated name is normally
-	/// populated lazily when the \c name member function is called.
-	struct msvc_type_info_equiv
-	{
-		void const *vptr;           ///< Pointer to virtual table
-		char const *undecorated;    ///< Pointer to the undecorated name
-		char decorated[1];          ///< First character of the decorated name
-	};
+	struct msvc_complete_object_locator_equiv;
+	struct msvc_type_info_equiv;
 
 	/// \brief Single inheritance member function pointer equivalent
 	///
@@ -348,6 +338,7 @@ protected:
 	};
 
 	dynamic_derived_class_base(std::string_view name);
+	~dynamic_derived_class_base();
 
 	static std::size_t resolve_virtual_member_slot(member_function_pointer_equiv &slot, std::size_t size);
 

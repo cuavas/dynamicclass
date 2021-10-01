@@ -11,6 +11,37 @@ namespace util {
 
 namespace detail {
 
+/// \brief Complete object locator equivalent structure
+///
+/// Structure used for locating the complete object and type information
+/// for the MSVC C++ ABI on 64-bit targets.  A pointer to this structure
+/// appears immediately before the first virtual member function entry
+/// in the virtual function table.
+struct msvc_complete_object_locator_equiv
+{
+	unsigned long signature;        ///< Magic number, always 1
+	unsigned long offset;           ///< Offset from complete object to current object
+	unsigned long ctor_disp_offset; ///< For avoiding extra constructor virtual tables for virtual inheritance
+	int type_info_offs;             ///< Offset to type info
+	int class_info_offs;            ///< Offset to class hierarchy info
+	int self_offs;                  ///< Offset to this structure for calculating module base
+};
+
+
+/// \brief Type info equivalent structure
+///
+/// Structure equivalent to the implementation of std::type_info for the
+/// MSVC C++ ABI.  The structure is followed immediately by the
+/// decorated name.  The pointer to the undecorated name is normally
+/// populated lazily when the \c name member function is called.
+struct dynamic_derived_class_base::msvc_type_info_equiv
+{
+	void const *vptr;           ///< Pointer to virtual table
+	char const *undecorated;    ///< Pointer to the undecorated name
+	char decorated[1];          ///< First character of the decorated name
+};
+
+
 /// \brief Construct dynamic derived class base
 ///
 /// Creates type info for a class with a single base class using the
@@ -93,6 +124,14 @@ dynamic_derived_class_base::dynamic_derived_class_base(std::string_view name) :
 }
 
 
+dynamic_derived_class_base::~dynamic_derived_class_base()
+{
+#if MAME_ABI_CXX_TYPE == MAME_ABI_CXX_MSVC
+	operator delete (m_type_info, std::align_val_t(alignof(msvc_type_info_equiv)));
+#endif
+}
+
+
 /// \brief Get virtual table index for member function
 ///
 /// Gets the virtual table index represented by a pointer to a virtual
@@ -117,7 +156,7 @@ std::size_t dynamic_derived_class_base::resolve_virtual_member_slot(
 #if defined(__x86_64__) || defined(_M_X64)
 	std::uint8_t const *func = reinterpret_cast<std::uint8_t const *>(slot.ptr);
 	while (0xe9 == func[0]) // relative jump with 32-bit displacement (typically a resolved PLT entry)
-		func += 5 + *reinterpret_cast<std::int32_t const *>(func + 1);
+		func += std::ptrdiff_t(5) + *reinterpret_cast<std::int32_t const *>(func + 1);
 	if ((0x48 == func[0]) && (0x8b == func[1]) && (0x01 == func[2]))
 	{
 		if ((0xff == func[3]) && ((0x20 == func[4]) || (0x60 == func[4]) || (0xa0 == func[4])))
