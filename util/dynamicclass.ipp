@@ -83,8 +83,8 @@ inline void dynamic_derived_class_base::restore_base_vptr(
 /// \param [in] func Pointer to member function of base class.
 /// \return A \c std::pair containing the conventional function pointer
 ///   and adjusted \c this pointer.
-/// \exception std::invalid_argument Thrown if the \func argument is not
-///   a supported member function.  This includes non-virtual member
+/// \exception std::invalid_argument Thrown if the \p func argument is
+///   not a supported member function.  This includes non-virtual member
 ///   functions and virtual member functions that aren't supported for
 ///   overriding when using the MSVC C++ ABI.
 template <typename Base, typename R, typename... T>

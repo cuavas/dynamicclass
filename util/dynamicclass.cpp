@@ -17,7 +17,7 @@ namespace detail {
 /// for the MSVC C++ ABI on 64-bit targets.  A pointer to this structure
 /// appears immediately before the first virtual member function entry
 /// in the virtual function table.
-struct msvc_complete_object_locator_equiv
+struct dynamic_derived_class_base::msvc_complete_object_locator_equiv
 {
 	unsigned long signature;        ///< Magic number, always 1
 	unsigned long offset;           ///< Offset from complete object to current object
